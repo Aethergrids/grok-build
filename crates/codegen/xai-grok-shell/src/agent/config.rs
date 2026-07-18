@@ -3966,10 +3966,9 @@ impl ModelEntry {
             api_base_url: entry.api_base_url.clone(),
         }
     }
-    /// The model's own (BYOK) credential: a non-empty `api_key`, else the first
-    /// set, non-empty `env_key` value. `None` means the model has no usable own
-    /// credential and resolution should fall through to the session / global key.
-    fn own_credential(&self) -> Option<String> {
+    /// Non-empty `api_key`, else first non-empty resolved `env_key`.
+    /// `None` → fall through to session / global key.
+    pub(crate) fn own_credential(&self) -> Option<String> {
         first_own_credential(self.api_key.as_deref(), self.env_key.as_ref())
     }
     /// `true` when the model has a non-empty `api_key` or an `env_key` that
@@ -4412,7 +4411,7 @@ pub fn enforce_disable_api_key_auth(
 ) {
     if disable_api_key_auth
         && creds.auth_type == xai_chat_state::AuthType::ApiKey
-        && crate::util::is_first_party_xai_url(&creds.base_url)
+        && crate::util::is_xai_api_url(&creds.base_url)
     {
         creds.auth_type = xai_chat_state::AuthType::SessionToken;
         creds.api_key = session_key.map(str::to_owned);
@@ -4687,7 +4686,7 @@ pub fn sampling_config_for_model(
         &credentials.base_url,
     );
     let api_backend = info.api_backend.clone();
-    let first_party = crate::util::is_first_party_xai_url(&credentials.base_url);
+    let first_party = crate::util::is_xai_api_url(&credentials.base_url);
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -9291,7 +9290,6 @@ agent_type = "cursor"
             url = "https://mcp.test.com"
             [toolset.bash]
             timeout_secs = 120
-            persistent_shell = true
             [shortcuts]
             ctrl_k = "search"
             [grok_com_config]
