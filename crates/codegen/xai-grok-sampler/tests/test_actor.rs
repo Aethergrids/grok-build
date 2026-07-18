@@ -72,6 +72,7 @@ fn test_config(base_url: String, model: &str) -> SamplerConfig {
     SamplerConfig {
         api_key: Some("test-key".into()),
         base_url,
+        first_party: true,
         model: model.into(),
         max_completion_tokens: Some(1024),
         temperature: None,

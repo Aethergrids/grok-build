@@ -42,6 +42,7 @@ const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
 /// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
 struct GrokRequestHeaders<'a> {
+    first_party: bool,
     conv_id: &'a str,
     req_id: &'a str,
     model_id: &'a str,
@@ -54,6 +55,9 @@ struct GrokRequestHeaders<'a> {
 
 impl GrokRequestHeaders<'_> {
     fn apply(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if !self.first_party {
+            return builder;
+        }
         let mut b = builder
             .header("x-grok-conv-id", self.conv_id)
             .header("x-grok-req-id", self.req_id)
@@ -280,6 +284,7 @@ pub struct SamplingClient {
     http: reqwest::Client,
     default_headers: HeaderMap,
     base_url: String,
+    first_party: bool,
     defaults: ClientDefaults,
     /// Optional 401-attribution hook. The shell wires this to emit a
     /// structured event at every UNAUTHORIZED arm so 401s can be
@@ -444,32 +449,32 @@ impl SamplingClient {
             headers.insert(header_name, header_value);
         }
 
-        // Add x-grok-client-version header for version gating at the proxy.
-        if let Some(client_version) = config.client_version.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(client_version)
-        {
-            headers.insert(
-                HeaderName::from_static("x-grok-client-version"),
-                header_value,
-            );
-        }
+        if config.first_party {
+            // Add x-grok-client-version header for version gating at the proxy.
+            if let Some(client_version) = config.client_version.as_ref()
+                && let Ok(header_value) = HeaderValue::from_str(client_version)
+            {
+                headers.insert(
+                    HeaderName::from_static("x-grok-client-version"),
+                    header_value,
+                );
+            }
 
-        if let Some(deployment_id) = config.deployment_id.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(deployment_id)
-        {
-            headers.insert(
-                HeaderName::from_static("x-grok-deployment-id"),
-                header_value,
-            );
-        }
+            if let Some(deployment_id) = config.deployment_id.as_ref()
+                && let Ok(header_value) = HeaderValue::from_str(deployment_id)
+            {
+                headers.insert(
+                    HeaderName::from_static("x-grok-deployment-id"),
+                    header_value,
+                );
+            }
 
-        if let Some(user_id) = config.user_id.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(user_id)
-        {
-            headers.insert(HeaderName::from_static("x-grok-user-id"), header_value);
-        }
+            if let Some(user_id) = config.user_id.as_ref()
+                && let Ok(header_value) = HeaderValue::from_str(user_id)
+            {
+                headers.insert(HeaderName::from_static("x-grok-user-id"), header_value);
+            }
 
-        {
             let client_id = config
                 .client_identifier
                 .clone()
@@ -534,6 +539,7 @@ impl SamplingClient {
             http,
             default_headers: headers,
             base_url: config.base_url,
+            first_party: config.first_party,
             defaults,
             attribution_callback: config.attribution_callback,
             bearer_resolver: config.bearer_resolver,
@@ -544,6 +550,11 @@ impl SamplingClient {
     /// The configured API backend for this client.
     pub fn api_backend(&self) -> ApiBackend {
         self.defaults.api_backend.clone()
+    }
+
+    /// Whether this client targets a first-party xAI endpoint.
+    pub fn is_first_party(&self) -> bool {
+        self.first_party
     }
 
     /// POST with default headers. Overrides auth from resolver if wired.
@@ -852,6 +863,7 @@ impl SamplingClient {
         );
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -910,6 +922,7 @@ impl SamplingClient {
         };
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1124,6 +1137,7 @@ impl SamplingClient {
         tracing::debug!("endpoint: {:?}", self.endpoint("responses"));
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1259,6 +1273,7 @@ impl SamplingClient {
         );
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1491,6 +1506,7 @@ impl SamplingClient {
         tracing::debug!("endpoint: {:?}", self.endpoint("messages"));
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1607,6 +1623,7 @@ impl SamplingClient {
         );
 
         let grok_headers = GrokRequestHeaders {
+            first_party: self.first_party,
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -2017,6 +2034,7 @@ mod tests {
         SamplerConfig {
             api_key: Some("test-key".to_string()),
             base_url: "https://example.test".to_string(),
+            first_party: true,
             model: "test-model".to_string(),
             max_completion_tokens: None,
             temperature: None,
@@ -2194,6 +2212,50 @@ mod tests {
         cfg.extra_headers
             .insert("x-XAI-token-auth".to_string(), "xai-grok-cli".to_string());
         let _client = SamplingClient::new(cfg).expect("client with extra headers should construct");
+    }
+
+    #[test]
+    fn non_first_party_omits_xai_identity_headers_but_keeps_functional_headers() {
+        let cfg = SamplerConfig {
+            first_party: false,
+            client_version: Some("1.2.3".to_string()),
+            deployment_id: Some("deployment".to_string()),
+            user_id: Some("user".to_string()),
+            client_identifier: Some("client".to_string()),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should construct");
+        let request = GrokRequestHeaders {
+            first_party: client.first_party,
+            conv_id: "conversation",
+            req_id: "request",
+            model_id: "model",
+            session_id: "session",
+            turn_idx: Some("1"),
+            agent_id: "agent",
+            deployment_id: Some("deployment"),
+            user_id: Some("user"),
+        }
+        .apply(client.post("https://example.test/v1/chat/completions"))
+        .build()
+        .expect("request should build");
+
+        for name in [
+            "x-grok-client-version",
+            "x-grok-deployment-id",
+            "x-grok-user-id",
+            "x-grok-client-identifier",
+            "x-grok-conv-id",
+            "x-grok-req-id",
+            "x-grok-model-override",
+            "x-grok-session-id",
+            "x-grok-turn-idx",
+            "x-grok-agent-id",
+        ] {
+            assert!(request.headers().get(name).is_none(), "unexpected {name}");
+        }
+        assert!(request.headers().get(AUTHORIZATION).is_some());
+        assert!(request.headers().get(USER_AGENT).is_some());
     }
 
     #[test]

@@ -449,6 +449,9 @@ impl MvpAgent {
     }
     /// Build a `FeedbackClient` with resolved feedback URL and credentials.
     pub(crate) fn feedback_client(&self) -> Option<FeedbackClient> {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
         let (base_url, user_token, alpha_test_key, deployment_key) = self
             .feedback_credentials()?;
         Some(
@@ -462,6 +465,9 @@ impl MvpAgent {
     pub(super) fn build_registry_config(
         &self,
     ) -> Option<crate::session::RegistryConfig> {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
         let remote = self
             .cfg
             .borrow()
@@ -489,6 +495,9 @@ impl MvpAgent {
     pub(crate) fn session_registry_client(
         &self,
     ) -> Option<crate::agent::session_registry_client::SessionRegistryClient> {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
         let cfg = self.build_registry_config()?;
         Some(
             crate::agent::session_registry_client::SessionRegistryClient::new(
@@ -503,13 +512,19 @@ impl MvpAgent {
     pub(crate) fn conversations_client(
         &self,
     ) -> Option<crate::remote::ConversationsClient> {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
         if !crate::session::unified_list::conversations_lane_active() {
             return None;
         }
         Some(crate::remote::ConversationsClient::new(self.auth_manager.clone()))
     }
-    pub(crate) fn workspaces_client(&self) -> crate::remote::WorkspacesClient {
-        crate::remote::WorkspacesClient::new(self.auth_manager.clone())
+    pub(crate) fn workspaces_client(&self) -> Option<crate::remote::WorkspacesClient> {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
+        Some(crate::remote::WorkspacesClient::new(self.auth_manager.clone()))
     }
     /// Pre-session command availability snapshot.
     ///
@@ -546,6 +561,7 @@ impl MvpAgent {
     pub(crate) fn product_analytics_enabled(&self) -> bool {
         self.cfg.borrow().is_telemetry_enabled()
             && !self.auth_manager.current_or_expired().is_some_and(|a| a.is_zdr_team())
+            && !xai_grok_env::enforce_zdr()
     }
     /// Re-sync the `Send` mirror of `cfg.is_trace_upload_enabled()` that the
     /// per-session collection gates read (`cfg` is `!Send`; the gates run on
@@ -909,6 +925,10 @@ impl MvpAgent {
     /// announcements-only apply. Every failure path is a silent skip — the
     /// next tick retries.
     async fn fetch_and_store_polled_announcements(&self) {
+        if xai_grok_env::enforce_zdr() {
+            tracing::debug!("announcements refresh skipped: enforced ZDR");
+            return;
+        }
         let Ok(auth) = self.auth_manager.auth().await else {
             tracing::debug!("announcements refresh skipped: not authenticated");
             return;

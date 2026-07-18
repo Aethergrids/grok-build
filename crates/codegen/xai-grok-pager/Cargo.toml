@@ -9,6 +9,7 @@ authors = ["xAI"]
 # TTY safety — detach subprocesses from the controlling terminal
 dunce = { workspace = true }
 xai-tty-utils = { workspace = true }
+xai-grok-env = { workspace = true }
 xai-grok-version = { workspace = true }
 
 # Shared prompt-queue wire types

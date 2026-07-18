@@ -51,7 +51,7 @@ async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
 
     // Only block for ZDR teams (hard data-retention policy), not for
     // coding-data-retention opt-out — sharing is user-initiated.
-    if auth.is_zdr_team() {
+    if auth.is_zdr_team() || xai_grok_env::enforce_zdr() {
         return Err(acp::Error::invalid_params()
             .data("Session sharing is disabled for your team's data retention policy"));
     }

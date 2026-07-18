@@ -34,6 +34,12 @@ pub struct StreamingSttSession {
 impl StreamingSttSession {
     /// Connect and wait for `transcript.created` before sending audio.
     pub async fn connect(config: &VoiceConfig, bearer: &str) -> Result<Self, VoiceError> {
+        if xai_grok_env::enforce_zdr() {
+            return Err(VoiceError::Stt(
+                "voice STT streaming is disabled while ZDR enforcement is enabled".into(),
+            ));
+        }
+
         let url = build_stt_ws_url(config)?;
         let mut request = url
             .as_str()

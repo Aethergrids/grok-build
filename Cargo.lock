@@ -13335,6 +13335,7 @@ dependencies = [
  "xai-grok-agent",
  "xai-grok-announcements",
  "xai-grok-config",
+ "xai-grok-env",
  "xai-grok-markdown",
  "xai-grok-mermaid",
  "xai-grok-pager-pty-harness",
@@ -13381,6 +13382,7 @@ dependencies = [
  "xai-acp-lib",
  "xai-crash-handler",
  "xai-grok-config",
+ "xai-grok-env",
  "xai-grok-pager",
  "xai-grok-pager-minimal",
  "xai-grok-sandbox",
@@ -13722,6 +13724,7 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-config",
  "xai-grok-config-types",
+ "xai-grok-env",
  "xai-grok-hooks",
  "xai-grok-http",
  "xai-grok-mcp",
@@ -14002,6 +14005,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+ "xai-grok-env",
  "xai-grok-shell",
  "xai-grok-tools",
  "xai-grok-version",
@@ -14031,6 +14035,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "xai-grok-env",
 ]
 
 [[package]]

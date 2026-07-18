@@ -307,9 +307,11 @@ impl SessionActor {
                 extra_headers.insert("x-compaction-at".to_string(), value.to_string());
             }
         }
+        let first_party = crate::util::is_first_party_xai_url(&cfg.base_url);
         SamplingConfig {
             api_key: creds.api_key,
             base_url: cfg.base_url,
+            first_party,
             model: cfg.model,
             max_completion_tokens: cfg.max_completion_tokens,
             temperature: cfg.temperature,
@@ -410,6 +412,7 @@ impl SessionActor {
                             (client, model)
                         }
                     };
+                    let endpoint_is_first_party = sampling_client.is_first_party();
                     let session_id = session.session_info.id.to_string();
                     let items = messages
                         .into_iter()
@@ -434,10 +437,12 @@ impl SessionActor {
                             xai_grok_workspace::permission::classifier_output_json_schema(),
                         ),
                         reasoning_effort: classifier_reasoning_effort,
-                        x_grok_conv_id: Some(session_id.clone()),
-                        x_grok_req_id: Some(format!("xai-perm-auto-{}", uuid::Uuid::new_v4())),
-                        x_grok_session_id: Some(session_id),
-                        x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
+                        x_grok_conv_id: endpoint_is_first_party.then(|| session_id.clone()),
+                        x_grok_req_id: endpoint_is_first_party
+                            .then(|| format!("xai-perm-auto-{}", uuid::Uuid::new_v4())),
+                        x_grok_session_id: endpoint_is_first_party.then_some(session_id),
+                        x_grok_agent_id: endpoint_is_first_party
+                            .then(xai_grok_telemetry::id::agent_id),
                         ..ConversationRequest::default()
                     };
                     let fut = sampling_client.conversation_collect(request);

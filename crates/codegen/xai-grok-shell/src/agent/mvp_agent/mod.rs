@@ -1169,13 +1169,15 @@ fn inject_proxy_headers(
     alpha_test_key: Option<&str>,
     base_url: &str,
 ) {
-    headers
-        .entry("x-grok-client-version".to_string())
-        .or_insert_with(|| {
-            client_version
-                .map(String::from)
-                .unwrap_or_else(|| xai_grok_version::VERSION.to_string())
-        });
+    if crate::util::is_first_party_xai_url(base_url) {
+        headers
+            .entry("x-grok-client-version".to_string())
+            .or_insert_with(|| {
+                client_version
+                    .map(String::from)
+                    .unwrap_or_else(|| xai_grok_version::VERSION.to_string())
+            });
+    }
     if crate::util::is_cli_chat_proxy_url(base_url) {
         headers
             .entry("X-XAI-Token-Auth".to_string())

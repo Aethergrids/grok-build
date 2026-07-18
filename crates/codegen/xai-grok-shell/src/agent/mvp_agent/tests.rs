@@ -432,6 +432,7 @@ fn harness_pair(id: &str) -> Vec<xai_grok_sampling_types::conversation::Conversa
 /// This is what makes each sibling `turn_{N}` reachable — without the
 /// advance every harness turn would clobber the same GCS path.
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(zdr)]
 async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     let agent = build_minimal_agent_for_tests();
     {
@@ -550,6 +551,7 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
 /// manifest listing exactly those two; (3) `fully_uploaded` is true iff
 /// neither failed.
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(zdr)]
 async fn upload_harness_trace_turns_build_per_turn_manifest() {
     use crate::upload::manifest::{
         ArtifactResult, ArtifactStatus, build_manifest, record_artifact, resolve_upload_method,
@@ -2518,6 +2520,7 @@ async fn prepare_image_gen_config_fails_open_without_auth() {
     );
 }
 #[tokio::test]
+#[serial_test::serial(zdr)]
 async fn data_collection_enabled_for_normal_user() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     assert!(
@@ -2579,6 +2582,7 @@ async fn data_collection_disabled_for_zdr_plus_opt_out() {
     );
 }
 #[tokio::test]
+#[serial_test::serial(zdr)]
 async fn data_collection_enabled_for_non_zdr_team_with_unrelated_blocks() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth {
         team_blocked_reasons: vec![
@@ -2603,12 +2607,14 @@ fn enable_trace_upload_config(agent: &MvpAgent) {
     cfg.telemetry.trace_upload = Some(true);
 }
 #[tokio::test]
+#[serial_test::serial(zdr)]
 async fn product_analytics_enabled_for_normal_user_with_telemetry_on() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_product_telemetry(&agent);
     assert!(agent.product_analytics_enabled());
 }
 #[tokio::test]
+#[serial_test::serial(zdr)]
 async fn product_analytics_enabled_despite_coding_retention_opt_out() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth {
         coding_data_retention_opt_out: true,
@@ -2632,6 +2638,40 @@ async fn product_analytics_disabled_when_telemetry_off() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     agent.cfg.borrow_mut().features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
     assert!(!agent.product_analytics_enabled());
+}
+#[tokio::test]
+#[serial_test::serial(zdr)]
+async fn enforce_zdr_blocks_non_model_egress_chokepoints() {
+    struct ResetZdr;
+    impl Drop for ResetZdr {
+        fn drop(&mut self) {
+            xai_grok_env::set_enforce_zdr(false);
+        }
+    }
+
+    xai_grok_env::set_enforce_zdr(true);
+    let _reset = ResetZdr;
+    let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
+    enable_product_telemetry(&agent);
+
+    assert!(!agent.product_analytics_enabled());
+    assert!(agent.feedback_client().is_none());
+    assert!(agent.build_registry_config().is_none());
+    assert!(agent.session_registry_client().is_none());
+    assert!(agent.conversations_client().is_none());
+    assert!(agent.workspaces_client().is_none());
+    assert_eq!(
+        agent.cfg.borrow().resolve_telemetry_mode().value,
+        crate::agent::config::TelemetryMode::Disabled
+    );
+    assert!(
+        agent
+            .cfg
+            .borrow()
+            .endpoints
+            .resolve_upload_method(Some("token".to_string()))
+            .is_none()
+    );
 }
 /// Counting HTTP stub: any request increments the counter and gets a
 /// storage-proxy-shaped 200 so the client does not retry.
@@ -2676,6 +2716,7 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
     );
 }
 #[tokio::test]
+#[serial_test::serial(zdr)]
 async fn diagnostic_upload_sent_for_normal_user() {
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());

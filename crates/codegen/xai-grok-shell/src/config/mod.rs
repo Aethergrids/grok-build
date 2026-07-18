@@ -1054,6 +1054,7 @@ fn apply_requirements_inner(
         };
     }
     pin_feature!(feedback);
+    pin_feature!(enforce_zdr);
     pin_feature!(lsp_tools);
     pin_feature!(tool_search);
     pin_feature!(web_fetch);

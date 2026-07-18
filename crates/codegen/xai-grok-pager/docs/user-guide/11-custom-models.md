@@ -65,7 +65,7 @@ Grok supports three API backends. Set `api_backend` in your `[model.*]` config t
 
 When you omit `api_backend`, Grok uses `chat_completions`.
 
-To send provider-specific authentication or version headers -- for example, Anthropic's `x-api-key` -- use the `extra_headers` field described below. Grok sends those headers verbatim with every request to the endpoint.
+Set `auth_scheme = "x_api_key"` for providers such as Anthropic that authenticate with `x-api-key` instead of `Authorization: Bearer`. Use `extra_headers` for additional provider-specific headers.
 
 ---
 
@@ -82,6 +82,7 @@ description = "Model description"          # Optional description
 api_key = "sk-..."                        # API key for this provider (optional)
 env_key = "XAI_API_KEY"                   # Env var holding the API key (optional; string or array)
 api_backend = "chat_completions"          # "chat_completions", "responses", or "messages"
+auth_scheme = "bearer"                    # "bearer" (default) or "x_api_key"
 temperature = 0.7                         # Sampling temperature
 top_p = 0.95                              # Nucleus sampling parameter
 max_completion_tokens = 8192              # Maximum tokens per response
@@ -160,21 +161,56 @@ When you override a built-in model, Grok starts with the default configuration (
 
 ## Provider Examples
 
+This build defaults to ZDR enforcement (`[features] enforce_zdr` / `GROK_ENFORCE_ZDR`), under which only the model/inference call leaves the machine.
+
+### DeepSeek
+
+```toml
+[model.deepseek]
+model = "deepseek-chat"
+base_url = "https://api.deepseek.com"
+api_backend = "chat_completions"
+env_key = "DEEPSEEK_API_KEY"
+context_window = 64000
+```
+
+### OpenAI
+
+```toml
+[model.openai]
+model = "gpt-4o"
+base_url = "https://api.openai.com/v1"
+api_backend = "chat_completions"
+env_key = "OPENAI_API_KEY"
+context_window = 128000
+```
+
+### Kimi (Moonshot)
+
+```toml
+[model.kimi]
+model = "kimi-k2.5"
+base_url = "https://api.moonshot.ai/v1"
+api_backend = "chat_completions"
+env_key = "MOONSHOT_API_KEY"
+context_window = 262144
+```
+
 ### Anthropic (Claude)
 
 Use Claude models directly via the Anthropic Messages API:
 
 ```toml
-[model.claude-opus]
-model = "claude-opus-4-6"
+[model.claude]
+model = "claude-sonnet-4-5"
 base_url = "https://api.anthropic.com/v1"
-name = "Claude Opus 4.6"
 api_backend = "messages"
+auth_scheme = "x_api_key"
+env_key = "ANTHROPIC_API_KEY"
 context_window = 200000
-extra_headers = { "x-api-key" = "sk-ant-...", "anthropic-version" = "2023-06-01" }
 ```
 
-The `messages` backend uses the Anthropic Messages protocol. Anthropic authenticates with an `x-api-key` header rather than `Authorization: Bearer`, so pass your key through `extra_headers`, which Grok sends verbatim.
+The `messages` backend uses the Anthropic Messages protocol, and `auth_scheme = "x_api_key"` sends the resolved key in Anthropic's native `x-api-key` header.
 
 ### OpenAI (Chat Completions)
 

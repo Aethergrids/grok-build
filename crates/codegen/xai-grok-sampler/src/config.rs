@@ -49,6 +49,10 @@ pub enum AuthScheme {
 pub struct SamplerConfig {
     pub api_key: Option<String>,
     pub base_url: String,
+    /// Whether the resolved model endpoint is owned by xAI. Controls only
+    /// xAI identity headers; functional auth and User-Agent are unaffected.
+    #[serde(default)]
+    pub first_party: bool,
     pub model: String,
     pub max_completion_tokens: Option<u32>,
     pub temperature: Option<f32>,
@@ -133,6 +137,7 @@ impl Default for SamplerConfig {
         Self {
             api_key: None,
             base_url: String::new(),
+            first_party: false,
             model: String::new(),
             max_completion_tokens: None,
             temperature: None,

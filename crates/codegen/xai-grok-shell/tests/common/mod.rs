@@ -32,6 +32,7 @@ pub fn test_sampler_config(
     SamplerConfig {
         api_key: Some("test-api-key".to_string()),
         base_url: base_url.to_string(),
+        first_party: xai_grok_shell_base::util::is_first_party_xai_url(base_url),
         model: "test-model".to_string(),
         max_completion_tokens: Some(1000),
         temperature: Some(0.7),
