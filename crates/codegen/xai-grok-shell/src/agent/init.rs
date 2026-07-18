@@ -27,6 +27,12 @@ pub fn bootstrap(
     crate::managed_config::managed_policy_gate()?;
     let cfg = resolve_config(cfg, auth_manager);
     cfg.validate_model_filters()?;
+    // Set the process-global ZDR flag from resolved config. Skipped in unit-test
+    // builds: `bootstrap` runs per `MvpAgent` construction, so setting a process
+    // global here would let one test's agent flip ZDR for every parallel test.
+    // Production entry points (pager-bin `main`) set the flag once at startup.
+    #[cfg(not(test))]
+    xai_grok_env::set_enforce_zdr(cfg.resolve_enforce_zdr().value);
     init_process(&cfg, auth_manager);
     let models_manager = ModelsManager::from_config(&cfg, prefetched, auth_manager.clone())?;
 

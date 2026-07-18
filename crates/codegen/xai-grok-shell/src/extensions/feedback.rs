@@ -229,6 +229,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
             let telemetry_enabled = {
                 let cfg = agent.cfg.borrow();
                 cfg.is_telemetry_enabled()
+                    && !xai_grok_env::enforce_zdr()
                     && !agent
                         .auth_manager
                         .current_or_expired()
@@ -284,6 +285,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
             let telemetry_enabled = {
                 let cfg = agent.cfg.borrow();
                 cfg.is_telemetry_enabled()
+                    && !xai_grok_env::enforce_zdr()
                     && !agent
                         .auth_manager
                         .current_or_expired()

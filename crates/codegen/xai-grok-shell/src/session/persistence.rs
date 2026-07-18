@@ -1983,6 +1983,10 @@ fn init_remote_sync(
     match storage_mode {
         StorageMode::Local => Ok(None),
         StorageMode::Writeback => {
+            if xai_grok_env::enforce_zdr() {
+                tracing::debug!("enforced ZDR: skipping remote sync");
+                return Ok(None);
+            }
             let auth_manager = auth_manager.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::PermissionDenied,
@@ -1995,9 +1999,8 @@ fn init_remote_sync(
                     return Ok(None);
                 }
             } else {
-                tracing::warn!(
-                    "writeback: no auth loaded yet, ZDR check skipped (backend enforces server-side)"
-                );
+                tracing::warn!("writeback: no auth loaded yet, skipping remote sync");
+                return Ok(None);
             }
             tracing::info!("Writeback mode enabled, syncing to backend");
             let client =

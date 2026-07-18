@@ -43,7 +43,7 @@ pub async fn run(args: TraceArgs, agent_config: &AgentConfig) -> Result<()> {
         .await;
     }
 
-    if !agent_config.is_trace_upload_enabled() {
+    if !agent_config.is_trace_upload_enabled() || xai_grok_env::enforce_zdr() {
         tracing::warn!(
             session_id = %args.session_id,
             "trace_cmd: trace uploads disabled in config"

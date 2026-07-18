@@ -2590,6 +2590,7 @@ impl acp::Agent for MvpAgent {
                         );
                     }
                     if turn_number == 0
+                        && !xai_grok_env::enforce_zdr()
                         && let Some(client) = self.session_registry_client()
                     {
                         let cwd_str = handle.info.cwd.clone();

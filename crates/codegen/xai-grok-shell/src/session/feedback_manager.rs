@@ -81,6 +81,11 @@ pub(crate) async fn submit_feedback_workflow(
     solicited: bool,
     telemetry_enabled: bool,
 ) -> SubmitOutcome {
+    let feedback_client = if xai_grok_env::enforce_zdr() {
+        None
+    } else {
+        feedback_client
+    };
     if let Some(tx) = persistence_tx {
         let entry = LocalFeedbackEntry::UserFeedback(UserFeedbackEntry {
             submitted_at: chrono::Utc::now(),
@@ -301,7 +306,7 @@ impl FeedbackManager {
 
     /// Check if feedback collection is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.config.feedback_enabled
+        self.config.feedback_enabled && !xai_grok_env::enforce_zdr()
     }
 
     /// REST client for the feedback/analytics backend, if configured.
@@ -395,7 +400,7 @@ impl FeedbackManager {
             return; // No client, use defaults
         };
 
-        if self.config.feedback_enabled {
+        if self.config.feedback_enabled && !xai_grok_env::enforce_zdr() {
             match client.get_feedback_config().await {
                 Ok(config) => {
                     let mut heuristics = self.heuristics.write().await;
@@ -437,7 +442,7 @@ impl FeedbackManager {
         &self,
         prompt_id: Option<String>,
     ) -> Option<FeedbackRequest> {
-        if !self.config.feedback_enabled {
+        if !self.config.feedback_enabled || xai_grok_env::enforce_zdr() {
             return None;
         }
 

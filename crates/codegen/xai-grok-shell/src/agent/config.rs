@@ -493,7 +493,11 @@ impl EndpointsConfig {
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod> {
-        if let Some(method) = self.resolve_direct_upload_method() {
+        if xai_grok_env::enforce_zdr() {
+            return None;
+        }
+        let direct_method = self.resolve_direct_upload_method();
+        if let Some(method) = direct_method {
             return Some(method);
         }
         if auth_token.is_some() || self.deployment_key.is_some() {
@@ -606,6 +610,7 @@ impl<T: Clone> Constrained<T> {
 #[derive(Debug, Clone, Default)]
 pub struct Requirements {
     pub telemetry: Constrained<TelemetryMode>,
+    pub enforce_zdr: Constrained<bool>,
     pub trace_upload: Constrained<bool>,
     pub feedback: Constrained<bool>,
     pub lsp_tools: Constrained<bool>,
@@ -2042,6 +2047,14 @@ impl Config {
     pub fn is_trace_upload_enabled(&self) -> bool {
         self.resolve_trace_upload().value
     }
+    pub fn resolve_enforce_zdr(&self) -> Resolved<bool> {
+        BoolFlag::env("GROK_ENFORCE_ZDR")
+            .requirement(self.requirements.enforce_zdr.pinned())
+            .config(self.features.enforce_zdr)
+            .feature_flag(None)
+            .default(true)
+            .resolve()
+    }
     pub fn is_feedback_enabled(&self) -> bool {
         self.resolve_feedback().value
     }
@@ -2058,6 +2071,9 @@ impl Config {
         self.resolve_two_pass_compaction().value
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
+        if xai_grok_env::enforce_zdr() {
+            return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
+        }
         if let Some(mode) = self.requirements.telemetry.pinned() {
             return Resolved::new(mode, ConfigSource::Requirement);
         }
@@ -2938,6 +2954,34 @@ pub fn is_error_reporting_disabled_sync() -> bool {
         .inherit(|| !is_telemetry_disabled_sync())
         .resolve()
 }
+/// Resolve ZDR before the async agent configuration path is available.
+/// Precedence: requirements > environment > effective config > default-on.
+pub fn resolve_enforce_zdr_sync() -> bool {
+    let from_toml = |root: &toml::Value| {
+        root.get("features")?
+            .as_table()?
+            .get("enforce_zdr")?
+            .as_bool()
+    };
+    resolve_enforce_zdr_sync_values(
+        xai_grok_config::load_merged_requirements()
+            .as_ref()
+            .and_then(from_toml),
+        env_bool("GROK_ENFORCE_ZDR"),
+        crate::config::load_effective_config()
+            .ok()
+            .as_ref()
+            .and_then(from_toml),
+    )
+}
+
+fn resolve_enforce_zdr_sync_values(
+    requirement: Option<bool>,
+    environment: Option<bool>,
+    config: Option<bool>,
+) -> bool {
+    requirement.or(environment).or(config).unwrap_or(true)
+}
 /// `[features] telemetry` as enabled bool. SessionMetrics counts as enabled
 /// — see ERROR_REPORTING_PLAN.md. `None` for absent or unparseable.
 fn telemetry_enabled_from_toml(root: &toml::Value) -> Option<bool> {
@@ -3581,6 +3625,8 @@ pub struct ConfigModelOverride {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub api_backend: Option<ApiBackend>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_scheme: Option<AuthScheme>,
     #[serde(default)]
     pub extra_headers: IndexMap<String, String>,
     pub context_window: Option<u64>,
@@ -3643,6 +3689,9 @@ impl ConfigModelOverride {
         }
         if let Some(ref v) = self.api_backend {
             entry.info.api_backend = v.clone();
+        }
+        if let Some(v) = self.auth_scheme {
+            entry.info.auth_scheme = v;
         }
         if !self.extra_headers.is_empty() {
             entry.info.extra_headers = self.extra_headers.clone();
@@ -4129,6 +4178,9 @@ pub struct Features {
     /// `None` = defer to remote settings / default (false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feedback: Option<bool>,
+    /// Zero Data Retention enforcement. `None` = env / requirements / default on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enforce_zdr: Option<bool>,
     /// Managed config fetching (managed_config.toml + requirements.toml).
     /// `None` = defer to env / default (true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4634,10 +4686,12 @@ pub fn sampling_config_for_model(
         &credentials.base_url,
     );
     let api_backend = info.api_backend.clone();
+    let first_party = crate::util::is_xai_api_url(&credentials.base_url);
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
         base_url: credentials.base_url,
+        first_party,
         max_completion_tokens,
         temperature,
         top_p,
@@ -6263,6 +6317,24 @@ reasoning_effort = "low"
         let resolved = resolve_model_list(&cfg, None);
         let model = resolved.get("my-chat-model").expect("model should exist");
         assert_eq!(model.info.api_backend, ApiBackend::ChatCompletions);
+    }
+    #[test]
+    fn config_model_override_parses_x_api_key_auth_scheme() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.my-claude]
+            model = "claude-sonnet-4-5"
+            base_url = "https://api.anthropic.com/v1"
+            context_window = 200000
+            api_backend = "messages"
+            auth_scheme = "x_api_key"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("my-claude").expect("model should exist");
+        assert_eq!(model.info.auth_scheme, AuthScheme::XApiKey);
     }
     /// Messages backend (Anthropic) auto-defaults supports_reasoning_effort=true.
     /// Without this, `--reasoning-effort` is silently dropped in
@@ -8119,6 +8191,7 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
+    #[serial_test::serial(zdr)]
     fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
@@ -8139,6 +8212,7 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
+    #[serial_test::serial(zdr)]
     fn trace_upload_decision_debug_reports_winning_source() {
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
@@ -8162,6 +8236,7 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
+    #[serial_test::serial(zdr)]
     fn resolve_trace_upload_honors_config_when_telemetry_on() {
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
@@ -9354,6 +9429,7 @@ agent_type = "cursor"
     }
     /// Regression: a deployment key with no OAuth token must resolve to Proxy.
     #[test]
+    #[serial_test::serial(zdr)]
     fn resolve_upload_method_accepts_deployment_key_without_oauth() {
         use crate::session::repo_changes::UploadMethod;
         let endpoints = EndpointsConfig {
@@ -10401,6 +10477,19 @@ telemetry = "garbage"
         )
         .unwrap();
         assert_eq!(telemetry_enabled_from_toml(&unknown), None);
+    }
+    #[test]
+    fn resolve_enforce_zdr_sync_requirement_wins() {
+        assert!(resolve_enforce_zdr_sync_values(
+            Some(true),
+            None,
+            Some(false)
+        ));
+        assert!(resolve_enforce_zdr_sync_values(
+            Some(true),
+            Some(false),
+            Some(false)
+        ));
     }
     #[test]
     #[serial]

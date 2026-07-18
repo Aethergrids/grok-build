@@ -10,6 +10,30 @@
 //!
 //! Public builds expose production endpoints. Values resolve as a `GROK_*`
 //! env-var override when set, else the compiled production default.
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static ENFORCE_ZDR: AtomicBool = AtomicBool::new(false);
+
+/// Set the process-global Zero Data Retention enforcement flag.
+pub fn set_enforce_zdr(value: bool) {
+    ENFORCE_ZDR.store(value, Ordering::Relaxed);
+}
+
+/// Returns true when ZDR enforcement has been set or `GROK_ENFORCE_ZDR` is truthy.
+pub fn enforce_zdr() -> bool {
+    ENFORCE_ZDR.load(Ordering::Relaxed) || env_bool("GROK_ENFORCE_ZDR") == Some(true)
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    let value = std::env::var(name).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" => None,
+        "1" | "true" | "yes" | "on" | "enabled" => Some(true),
+        "0" | "false" | "no" | "off" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
 /// The endpoint set for one backend environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GrokBuildEndpoints {

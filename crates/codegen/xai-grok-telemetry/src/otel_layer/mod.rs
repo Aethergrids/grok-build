@@ -268,7 +268,8 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
         batch: Vec<opentelemetry_sdk::trace::SpanData>,
     ) -> impl std::future::Future<Output = opentelemetry_sdk::error::OTelSdkResult> + Send {
         let prepared = (crate::client::is_session_metrics_enabled()
-            && self.credentials.has_usable_credential())
+            && self.credentials.has_usable_credential()
+            && !xai_grok_env::enforce_zdr())
         .then(|| {
             let snapshot = self.credentials.snapshot();
             let token = snapshot.token.clone().unwrap_or_else(|| {

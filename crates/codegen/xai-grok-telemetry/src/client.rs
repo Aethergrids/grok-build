@@ -132,6 +132,9 @@ static TELEMETRY_CLIENT: OnceLock<Mutex<Option<TelemetryClient>>> = OnceLock::ne
 /// Returns `true` when telemetry mode is `Enabled`.
 /// Used by `log_event` — product analytics events only fire in `Enabled` mode.
 pub fn is_enabled() -> bool {
+    if xai_grok_env::enforce_zdr() {
+        return false;
+    }
     TELEMETRY_CLIENT
         .get()
         .and_then(|m| m.lock().ok())
@@ -141,6 +144,9 @@ pub fn is_enabled() -> bool {
 /// Returns `true` when telemetry mode is `Enabled` or `SessionMetrics`.
 /// Used by `session_metrics` — lifecycle events fire in both modes.
 pub fn is_session_metrics_enabled() -> bool {
+    if xai_grok_env::enforce_zdr() {
+        return false;
+    }
     TELEMETRY_CLIENT
         .get()
         .and_then(|m| m.lock().ok())
@@ -170,6 +176,9 @@ impl UserContext {
 
 /// Core telemetry emitter. Routes to product events + Mixpanel.
 pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut metadata: Metadata) {
+    if xai_grok_env::enforce_zdr() {
+        return;
+    }
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let client = {
         let guard = lock.lock().unwrap_or_else(|err| err.into_inner());
@@ -260,6 +269,9 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
 /// lifecycle events via [`track`], but must not write Mixpanel people
 /// profiles (`engage`).
 pub fn sync_profile() {
+    if xai_grok_env::enforce_zdr() {
+        return;
+    }
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let client = {
         let guard = lock.lock().unwrap_or_else(|err| err.into_inner());

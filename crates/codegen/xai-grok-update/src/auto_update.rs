@@ -106,6 +106,18 @@ pub async fn check_update_status(update_config: &UpdateConfig) -> UpdateStatus {
     let auto_update = current_config.cli.auto_update;
     let channel = update_config.channel.clone();
 
+    if xai_grok_env::enforce_zdr() {
+        return UpdateStatus {
+            current_version,
+            latest_version: None,
+            update_available: false,
+            installer,
+            channel,
+            auto_update,
+            error: None,
+        };
+    }
+
     let Some(ref inst) = installer else {
         return UpdateStatus {
             current_version,
@@ -173,6 +185,9 @@ pub async fn check_update_status(update_config: &UpdateConfig) -> UpdateStatus {
 /// on the installer (via `installer_allows_downgrade`) so npm is never
 /// downgraded — the decision depends on the installer, never the caller.
 pub async fn auto_update_target(update_config: &UpdateConfig) -> Option<(&'static str, String)> {
+    if xai_grok_env::enforce_zdr() {
+        return None;
+    }
     let installer = get_installer().await?;
     let current = get_installed_grok_version();
     let latest = fetch_latest_version(installer, update_config).await.ok()?;
@@ -219,6 +234,9 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
         installed: None,
         relaunch_needed: false,
     };
+    if xai_grok_env::enforce_zdr() {
+        return Ok(outcome);
+    }
     let Some(installer) = get_installer().await else {
         return Ok(outcome);
     };
@@ -387,6 +405,9 @@ impl BackgroundUpdateCheck {
 /// TUI, the leader's hourly checker) already put the target version on disk,
 /// no download is started — only the restart hint is surfaced.
 pub async fn check_update_background(update_config: &UpdateConfig) -> BackgroundUpdateCheck {
+    if xai_grok_env::enforce_zdr() {
+        return BackgroundUpdateCheck::none();
+    }
     let Some(installer) = get_installer().await else {
         return BackgroundUpdateCheck::none();
     };
@@ -469,6 +490,9 @@ pub async fn run_update_if_available(
     interactive: bool,
     update_config: &UpdateConfig,
 ) -> Result<bool> {
+    if xai_grok_env::enforce_zdr() {
+        return Ok(false);
+    }
     let Some(inst) = get_installer().await else {
         // Skip update check if no known installer.
         return Ok(false);

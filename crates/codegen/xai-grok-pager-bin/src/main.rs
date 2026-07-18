@@ -1073,6 +1073,7 @@ async fn run_agent_command(
         laziness_debug_log: None,
         storage_mode: None,
     });
+    xai_grok_env::set_enforce_zdr(agent_config.resolve_enforce_zdr().value);
     let agent_memory_config = agent_config.memory_config.clone();
     let leader_eligible = matches!(
         &agent_args.mode,
@@ -1591,6 +1592,9 @@ fn install_heap_profile_hooks() {
 }
 fn main() {
     xai_grok_pager_minimal::install();
+    xai_grok_env::set_enforce_zdr(
+        xai_grok_shell::agent::config::resolve_enforce_zdr_sync(),
+    );
     #[cfg(all(feature = "jemalloc", unix))]
     xai_grok_pager::memory_release::install_release_hook(purge_jemalloc_retained_pages);
     #[cfg(all(feature = "jemalloc", unix))]
@@ -1620,7 +1624,8 @@ fn main() {
         client: "grok-pager",
         client_version: PAGER_CLIENT_VERSION,
         release: env!("VERSION_WITH_COMMIT"),
-        disabled: xai_grok_shell::agent::config::is_error_reporting_disabled_sync(),
+        disabled: xai_grok_shell::agent::config::is_error_reporting_disabled_sync()
+            || xai_grok_env::enforce_zdr(),
     });
     xai_grok_pager::docs::extract_user_guide_docs(&xai_grok_shell::util::grok_home::grok_home());
     xai_crash_handler::install_terminal_restore_only();

@@ -488,6 +488,7 @@ fn is_data_collection_disabled_matrix() {
 /// closed (nothing may leave the machine while privacy state is unknown,
 /// e.g. after a mid-session `/logout`).
 #[test]
+#[serial_test::serial(zdr)]
 fn manager_collection_predicates_fail_directions() {
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));

@@ -920,9 +920,11 @@ async fn read_parent_sampling_config(
             let auth_scheme = crate::agent::config::try_resolve_model_credentials(&cfg.model, None)
                 .map(|r| r.auth_scheme)
                 .unwrap_or_default();
+            let first_party = crate::util::is_xai_api_url(&cfg.base_url);
             let inherited = xai_grok_sampler::SamplerConfig {
                 api_key: creds.api_key,
                 base_url: cfg.base_url,
+                first_party,
                 model: cfg.model.clone(),
                 max_completion_tokens: cfg.max_completion_tokens,
                 temperature: cfg.temperature,
