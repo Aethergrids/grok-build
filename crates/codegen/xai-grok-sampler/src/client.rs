@@ -20,7 +20,7 @@ use reqwest::header::{
 };
 use serde::Serialize;
 
-use xai_grok_sampling_types::error::{parse_error_bytes, try_parse_stream_error};
+use xai_grok_sampling_types::error::{try_parse_stream_error, user_facing_api_error_message};
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DOOM_LOOP_CHECK_HEADER, MessagesRequestWrapper,
@@ -689,48 +689,9 @@ impl SamplingClient {
             || lower.contains("secret")
     }
 
-    /// Format a single header for error messages, redacting sensitive values.
-    fn format_header(name: &str, value: &str) -> String {
-        let display_value = if Self::is_sensitive_header(name) {
-            "[REDACTED]"
-        } else {
-            value
-        };
-        format!("  {}: {}", name, display_value)
-    }
-
-    /// Build request headers string for error messages (redacting sensitive values).
-    fn format_request_headers(
-        &self,
-        x_grok_conv_id: &str,
-        x_grok_req_id: &str,
-        model_id: &str,
-        include_accept: bool,
-    ) -> Vec<String> {
-        let mut req_headers: Vec<String> = self
-            .default_headers
-            .iter()
-            .map(|(name, value)| {
-                Self::format_header(name.as_str(), value.to_str().unwrap_or("[non-utf8]"))
-            })
-            .collect();
-
-        req_headers.push(Self::format_header("x-grok-conv-id", x_grok_conv_id));
-        req_headers.push(Self::format_header("x-grok-req-id", x_grok_req_id));
-        req_headers.push(Self::format_header("x-grok-model-override", model_id));
-        if include_accept {
-            req_headers.push(Self::format_header("accept", "text/event-stream"));
-        }
-        req_headers
-    }
-
-    /// Build response headers string for error messages.
-    fn format_response_headers(response: &reqwest::Response) -> Vec<String> {
-        response
-            .headers()
-            .iter()
-            .map(|(name, value)| Self::format_header(name.as_str(), &format!("{:?}", value)))
-            .collect()
+    /// Short lossy body snippet for error logs (never user-facing).
+    fn body_preview(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).chars().take(500).collect()
     }
 
     /// Log all headers from a request at debug level (redacting sensitive values).
@@ -748,36 +709,6 @@ impl SamplingClient {
                 endpoint_name
             );
         }
-    }
-
-    /// Build error context message based on error type and status code.
-    /// Includes relevant request/response details depending on what the error is about.
-    fn build_api_error_message(
-        &self,
-        status: reqwest::StatusCode,
-        server_message: &str,
-        endpoint: &str,
-        req_headers: &[String],
-        resp_headers: Option<&[String]>,
-    ) -> String {
-        let server_message_lower = server_message.to_lowercase();
-
-        let mut context_parts = vec![server_message.to_string()];
-        context_parts.push(format!("\nRequest URL: {}", endpoint));
-
-        // Show headers if error mentions headers
-        if server_message_lower.contains("header") {
-            context_parts.push(format!("Request headers:\n{}", req_headers.join("\n")));
-        }
-
-        // Always show response headers for server errors
-        if status.is_server_error()
-            && let Some(resp_hdrs) = resp_headers
-        {
-            context_parts.push(format!("Response headers:\n{}", resp_hdrs.join("\n")));
-        }
-
-        context_parts.join("\n")
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -816,12 +747,12 @@ impl SamplingClient {
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(crate::attribution::SamplingConsumer::ChatCompletions);
-                let server_message = parse_error_bytes(bytes.as_ref());
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401): {server_message}"
                 )));
             }
-            let message = parse_error_bytes(bytes.as_ref());
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             return Err(SamplingError::Api {
                 status,
                 message,
@@ -969,30 +900,20 @@ impl SamplingClient {
                     crate::attribution::SamplingConsumer::ChatCompletionsStream,
                 );
                 let endpoint = self.endpoint("chat/completions");
-                let server_message = response.text().await.unwrap_or_default();
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
                 )));
             }
 
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("chat/completions"),
-                &req_headers,
-                Some(&resp_headers),
-            );
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "chat/completions API error"
             );
@@ -1175,26 +1096,17 @@ impl SamplingClient {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(crate::attribution::SamplingConsumer::Responses);
                 let endpoint = self.endpoint("responses");
-                let server_message = parse_error_bytes(bytes.as_ref());
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
                 )));
             }
 
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, false);
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("responses"),
-                &req_headers,
-                None,
-            );
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
             );
@@ -1311,7 +1223,9 @@ impl SamplingClient {
         let mut http_request = grok_headers
             .apply(self.post(self.endpoint("responses")))
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
-        if doom_loop.is_some() {
+        // ZDR/privacy: this xAI-specific control header goes only to first-party
+        // endpoints, never to user-configured third-party providers.
+        if doom_loop.is_some() && self.first_party {
             // Presence opts in; the server ignores the value.
             http_request = http_request.header(DOOM_LOOP_CHECK_HEADER, "true");
         }
@@ -1344,7 +1258,8 @@ impl SamplingClient {
                 span.record("error", "unauthorized (401)");
                 self.record_401_attribution(crate::attribution::SamplingConsumer::ResponsesStream);
                 let endpoint = self.endpoint("responses");
-                let server_message = response.text().await.unwrap_or_default();
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
                 )));
@@ -1352,24 +1267,13 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("responses"),
-                &req_headers,
-                Some(&resp_headers),
-            );
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
             );
@@ -1535,26 +1439,17 @@ impl SamplingClient {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(crate::attribution::SamplingConsumer::Messages);
                 let endpoint = self.endpoint("messages");
-                let server_message = parse_error_bytes(bytes.as_ref());
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
                 )));
             }
 
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, false);
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("messages"),
-                &req_headers,
-                None,
-            );
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
             );
@@ -1665,7 +1560,8 @@ impl SamplingClient {
                 span.record("error", "unauthorized (401)");
                 self.record_401_attribution(crate::attribution::SamplingConsumer::MessagesStream);
                 let endpoint = self.endpoint("messages");
-                let server_message = response.text().await.unwrap_or_default();
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
                 )));
@@ -1673,24 +1569,13 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("messages"),
-                &req_headers,
-                Some(&resp_headers),
-            );
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
             );

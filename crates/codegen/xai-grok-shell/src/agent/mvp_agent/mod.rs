@@ -794,20 +794,6 @@ pub struct MvpAgent {
     /// notification has `Next` priority. Drained by the session turn loop
     /// (`inject_pending_monitor_events`) into a hidden synthetic user message.
     monitor_event_buffer: xai_grok_tools::implementations::grok_build::task::types::MonitorEventBuffer,
-    /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
-    /// Populated from `SubagentsConfig.models` during `with_models()`.
-    subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
-    /// Populated from `SubagentsConfig.toggle` during `with_models()`.
-    subagent_toggle: std::collections::HashMap<String, bool>,
-    subagent_roles: std::collections::HashMap<
-        String,
-        xai_grok_subagent_resolution::config::SubagentRole,
-    >,
-    subagent_personas: std::collections::HashMap<
-        String,
-        xai_grok_subagent_resolution::config::SubagentPersona,
-    >,
     /// The process launch directory, captured once at construction so the
     /// deferred launch-dir init paths share one source of truth instead of each
     /// re-calling `std::env::current_dir()` (which could drift if the process
@@ -827,7 +813,6 @@ pub struct MvpAgent {
     /// the first session-creating call via [`Self::ensure_plugin_registry`];
     /// this flag keeps that to a single discovery walk.
     plugin_registry_initialized: std::cell::Cell<bool>,
-    persona_io_summaries: Vec<String>,
     /// Single-flight guard for the proactive bundle sync background task.
     ///
     /// `maybe_sync_bundle_in_background` is invoked from each post-auth path
@@ -1169,6 +1154,9 @@ fn inject_proxy_headers(
     alpha_test_key: Option<&str>,
     base_url: &str,
 ) {
+    // ZDR/privacy: xAI client-identity headers go only to first-party (xAI)
+    // endpoints, never to user-configured third-party providers. Upstream added
+    // `x-grok-client-identifier` here unconditionally; keep it gated with the rest.
     if crate::util::is_xai_api_url(base_url) {
         headers
             .entry("x-grok-client-version".to_string())
@@ -1177,6 +1165,9 @@ fn inject_proxy_headers(
                     .map(String::from)
                     .unwrap_or_else(|| xai_grok_version::VERSION.to_string())
             });
+        headers
+            .entry("x-grok-client-identifier".to_string())
+            .or_insert_with(crate::http::process_client_identifier);
     }
     if crate::util::is_cli_chat_proxy_url(base_url) {
         headers
@@ -1266,6 +1257,7 @@ mod session_lifecycle;
 mod subagent_coordinator;
 mod agent_ops;
 mod acp_agent;
+pub(crate) use session_lifecycle::RegistrySnapshot;
 pub(super) use super::ext_parsers;
 /// Emit the `auth.lifecycle` login span with optional user id and error
 /// category. Named `auth.lifecycle` (not `auth`) to avoid colliding with the
