@@ -307,12 +307,15 @@ pub const SESSION_ID_HEADER: &str = "x-grok-session-id";
 /// never to user-configurable third-party bases. The imagine/video base URL is
 /// `[endpoints] xai_api_base_url` (also settable via `GROK_XAI_API_BASE_URL`),
 /// which enterprise deployments legitimately repoint at their own gateway — so
-/// `x-grok-session-id` must not ride along. Mirrors the shell's
-/// `is_xai_api_url` host arm and `inject_proxy_headers` gating.
+/// `x-grok-session-id` must not ride along. Mirrors the host arm of the shell's
+/// `is_xai_api_url`, including its resistance to suffix attacks
+/// (`api.x.ai.evil.example` is not first-party).
+///
+/// Host-only by design: `xai_api_base_url` defaults to `https://api.x.ai/v1`
+/// and is a distinct setting from `cli_chat_proxy_base_url`, so there is no
+/// chat-proxy arm to honour here. Matching on a substring of the whole URL
+/// would let `https://attacker.example/chat-proxy` pass as first-party.
 pub(crate) fn is_first_party_base_url(base_url: &str) -> bool {
-    if base_url.contains("cli-chat-proxy") || base_url.contains("chat-proxy") {
-        return true;
-    }
     reqwest::Url::parse(base_url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
@@ -605,7 +608,12 @@ mod tests {
         for base in [
             "https://enterprise-api.acme.com/v1",
             "https://api.openai.com/v1",
+            // Suffix attack: must not match the `.x.ai` arm.
             "https://api.x.ai.evil.example/v1",
+            // Path-based spoof: first-party-ness is decided by host, not by a
+            // substring of the URL.
+            "https://attacker.example/cli-chat-proxy/v1",
+            "not a url",
         ] {
             let mut cfg = mk(base);
             cfg.stamp_session_id_header("sess-123");
@@ -615,11 +623,7 @@ mod tests {
             );
         }
 
-        for base in [
-            "https://api.x.ai/v1",
-            "https://x.ai/v1",
-            "https://cli-chat-proxy.internal/v1",
-        ] {
+        for base in ["https://api.x.ai/v1", "https://x.ai/v1"] {
             let mut cfg = mk(base);
             cfg.stamp_session_id_header("sess-123");
             assert_eq!(
