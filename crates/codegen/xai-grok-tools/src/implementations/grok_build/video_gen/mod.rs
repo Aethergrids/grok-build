@@ -691,6 +691,26 @@ impl VideoGenConfig {
     pub fn is_enabled(&self) -> bool {
         matches!(self, Self::Enabled { .. })
     }
+
+    /// Stamp [`super::image_gen::SESSION_ID_HEADER`] onto `extra_headers`.
+    /// A caller-provided value is never overwritten. No-op when `Disabled`, and
+    /// no-op when the base URL is not first-party (see
+    /// [`super::image_gen::is_first_party_base_url`]).
+    pub fn stamp_session_id_header(&mut self, session_id: &str) {
+        if let Self::Enabled {
+            base_url,
+            extra_headers,
+            ..
+        } = self
+        {
+            if !super::image_gen::is_first_party_base_url(base_url) {
+                return;
+            }
+            extra_headers
+                .entry(super::image_gen::SESSION_ID_HEADER.to_string())
+                .or_insert_with(|| session_id.to_string());
+        }
+    }
 }
 
 /// Prose returned to the model (as a normal, successful tool result) when a
@@ -1185,6 +1205,35 @@ impl xai_tool_runtime::Tool for ReferenceToVideoTool {
 mod tests {
     use super::*;
     use crate::types::tool_metadata::test_ctx_with_call_id;
+
+    /// ZDR: mirrors the image_gen gate — no xAI identity header on a
+    /// user-repointed (enterprise / third-party) base URL.
+    #[test]
+    fn stamp_session_id_header_gated_on_first_party_base_url() {
+        let mk = |base_url: &str| VideoGenConfig::Enabled {
+            api_key: "k".into(),
+            base_url: base_url.into(),
+            extra_headers: indexmap::IndexMap::new(),
+            zdr_video_output_s3: None,
+            tier_restricted: false,
+        };
+        let hdrs = |cfg: &VideoGenConfig| match cfg {
+            VideoGenConfig::Enabled { extra_headers, .. } => extra_headers.clone(),
+            _ => unreachable!(),
+        };
+        let header = super::super::image_gen::SESSION_ID_HEADER;
+
+        let mut third_party = mk("https://enterprise-api.acme.com/v1");
+        third_party.stamp_session_id_header("sess-123");
+        assert!(hdrs(&third_party).get(header).is_none());
+
+        let mut first_party = mk("https://api.x.ai/v1");
+        first_party.stamp_session_id_header("sess-123");
+        assert_eq!(
+            hdrs(&first_party).get(header).map(String::as_str),
+            Some("sess-123")
+        );
+    }
 
     #[test]
     fn image_to_video_name_and_description() {
