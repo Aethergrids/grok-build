@@ -1,0 +1,34 @@
+name: Deploy documentation release
+
+on:
+  push:
+    tags:
+      - "zdr-v*"
+
+permissions: {}
+
+concurrency:
+  group: cloudflare-pages-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Trigger Cloudflare Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger deployment hook
+        env:
+          CLOUDFLARE_DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: |
+          if [[ -z "$CLOUDFLARE_DEPLOY_HOOK_URL" ]]; then
+            echo "::error::CLOUDFLARE_DEPLOY_HOOK_URL is not configured"
+            exit 1
+          fi
+
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --request POST \
+            "$CLOUDFLARE_DEPLOY_HOOK_URL"
