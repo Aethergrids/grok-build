@@ -1021,7 +1021,7 @@ impl xai_tool_runtime::Tool for ImageToVideoTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             IMAGE_TO_VIDEO_TOOL_NAME,
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
@@ -1117,7 +1117,7 @@ impl xai_tool_runtime::Tool for ReferenceToVideoTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             REFERENCE_TO_VIDEO_TOOL_NAME,
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
